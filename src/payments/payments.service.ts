@@ -12,7 +12,7 @@ export class PaymentsService {
   private readonly logger = new Logger("PaymentsService");
 
   async createPaymentSession(paymentSessionDto: PaymentSessionDto) {
-    const { currency, items } = paymentSessionDto;
+    const { currency, items, orderId } = paymentSessionDto;
 
     const lineItems = items.map((item) => ({
       price_data: {
@@ -27,12 +27,14 @@ export class PaymentsService {
 
     const session = await this.stripe.checkout.sessions.create({
       payment_intent_data: {
-        metadata: {},
+        metadata: {
+          orderId,
+        },
       },
       line_items: lineItems,
       mode: "payment",
-      success_url: "http://localhost:3003/payments/success",
-      cancel_url: "http://localhost:3003/payments/cancel",
+      success_url: envs.stripeSuccessUrl,
+      cancel_url: envs.stripeCancelUrl,
     });
 
     return session;
@@ -42,13 +44,12 @@ export class PaymentsService {
     const signature = req.headers["stripe-signature"];
 
     let event: Stripe.Event;
-    const endpoint_secret = "whsec_AEZKK84B3G5CE7pT2ePDXl5lbBEjfYju";
 
     try {
       event = this.stripe.webhooks.constructEvent(
         req["rawBody"],
         signature,
-        endpoint_secret
+        envs.stripeEndpointSecret
       );
     } catch (error) {
       res.status(400).send(`Webhook Error: ${error.message}`);
@@ -57,7 +58,11 @@ export class PaymentsService {
 
     switch (event.type) {
       case "charge.succeeded":
-        console.log({ event });
+        const {
+          metadata: { orderId },
+        } = event.data.object;
+        this.logger.log(`Charge succeeded for order: ${orderId}`);
+        // TODO: Connect to order microservice to update order status
         break;
       default:
         this.logger.warn(`Unhandled event type: ${event.type}`);
